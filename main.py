@@ -9,6 +9,7 @@ import threading
 import queue
 import tempfile
 import logging
+import sys
 from typing import List, Optional
 
 # ---------------- Configuration ----------------
@@ -21,11 +22,12 @@ HISTORY_FETCH_LIMIT = None  # None = fetch all; set to an int to limit messages 
 HISTORY_CONCURRENCY = 3     # concurrent DM history fetches
 HISTORY_FETCH_TIMEOUT = 120  # seconds for the whole reload task
 
-# ---------------- Logging ----------------
+# ---------------- Logging (to stderr) ----------------
+handler = logging.StreamHandler(sys.stderr)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()]
+    handlers=[handler]
 )
 logger = logging.getLogger("dm-relay")
 
@@ -37,25 +39,23 @@ intents.dm_messages = True
 client = discord.Client(intents=intents)
 
 # ---------------- Shared state and synchronization ----------------
-# Thread-safe queue for passing incoming messages from the discord event loop to the CLI thread
 incoming_queue = queue.Queue()
 unread_count = 0
 unread_lock = threading.Lock()
 
-# conversations persisted in memory and on disk: {user_id: ["Author: content", ...]}
 conversations = {}
 conversations_lock = threading.Lock()
 
-# Shutdown coordination
 shutdown_event = threading.Event()
 
-# Bot status string (read-only for CLI)
 bot_status = ""
 bot_status_lock = threading.Lock()
 
+# Event to signal the bot is ready
+bot_ready_event: Optional[asyncio.Event] = None
+
 # ---------------- Utility: atomic save ----------------
 def atomic_save(path: str, data) -> None:
-    """Write JSON data atomically to avoid corruption."""
     dirn = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=dirn)
     try:
@@ -72,7 +72,7 @@ def atomic_save(path: str, data) -> None:
             pass
         raise
 
-# ---------------- Persistence (thread-safe wrappers) ----------------
+# ---------------- Persistence ----------------
 def load_json(path: str, default):
     if os.path.exists(path):
         try:
@@ -133,8 +133,7 @@ def get_token_interactive() -> str:
     return token
 
 # ---------------- Discord helpers ----------------
-async def fetch_channel_history(channel: discord.DMChannel, limit: Optional[int] = HISTORY_FETCH_LIMIT) -> List[discord.Message]:
-    """Fetch history for a DM channel (oldest first). Limit can be None or int."""
+async def fetch_channel_history(channel: discord.DMChannel, limit: Optional[int] = HISTORY_FETCH_LIMIT):
     msgs = []
     try:
         async for m in channel.history(limit=limit, oldest_first=True):
@@ -150,42 +149,35 @@ async def send_reply(uid: int, reply: str) -> None:
 # ---------------- Discord events ----------------
 @client.event
 async def on_ready():
-    global bot_status
+    global bot_status, bot_ready_event
     with bot_status_lock:
         bot_status = f"Connected as {client.user}"
     logger.info("Bot ready: %s", client.user)
     # load persisted conversations
     await asyncio.to_thread(load_conversations_sync)
+    # signal readiness to the main thread
+    if bot_ready_event is not None and not bot_ready_event.is_set():
+        bot_ready_event.set()
 
 @client.event
 async def on_message(message):
     global unread_count
     if isinstance(message.channel, discord.DMChannel) and not message.author.bot:
-        # Put into thread-safe queue for CLI thread to pick up
         incoming_queue.put((message.author, message.content))
         with unread_lock:
             unread_count += 1
-        # Update in-memory conversations under lock
         with conversations_lock:
             conversations.setdefault(message.author.id, []).append(f"{message.author}: {message.content}")
-        # Persist asynchronously (offload to thread)
         asyncio.create_task(save_conversations())
-        # Persist known user asynchronously
         known = set(load_known_users())
         known.add(message.author.id)
         asyncio.create_task(save_known_users(sorted(list(known))))
 
-# ---------------- Async reload task (concurrent, rate-friendly) ----------------
+# ---------------- Reload task (unchanged core) ----------------
 async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit_per_channel: Optional[int] = HISTORY_FETCH_LIMIT):
-    """
-    Fetch histories for known users and client.private_channels concurrently with a semaphore.
-    Updates conversations under lock and persists at the end.
-    """
     logger.info("Starting reload_all_histories (limit=%s, concurrency=%s)", limit_per_channel, semaphore_limit)
     sem = asyncio.Semaphore(semaphore_limit)
     known_ids = set(load_known_users())
-
-    # Also include recipients from client.private_channels
     for ch in client.private_channels:
         if isinstance(ch, discord.DMChannel) and ch.recipient:
             known_ids.add(ch.recipient.id)
@@ -196,7 +188,6 @@ async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit
                 user = client.get_user(uid) or await client.fetch_user(uid)
                 channel = user.dm_channel or await user.create_dm()
                 if channel is None:
-                    logger.debug("No DM channel for user %s", uid)
                     return uid, []
                 history = await fetch_channel_history(channel, limit=limit_per_channel)
                 texts = [f"{m.author}: {m.content}" for m in history]
@@ -209,14 +200,12 @@ async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit
                 logger.exception("Unexpected error fetching history for %s: %s", uid, e)
                 return uid, []
 
-    # Schedule all fetches
     tasks = [asyncio.create_task(fetch_for_uid(uid)) for uid in sorted(known_ids)]
     results = []
     try:
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=HISTORY_FETCH_TIMEOUT)
     except asyncio.TimeoutError:
         logger.warning("Reload timed out; gathering partial results.")
-        # cancel remaining tasks and gather what finished
         for t in tasks:
             if not t.done():
                 t.cancel()
@@ -227,7 +216,6 @@ async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit
             except Exception:
                 pass
 
-    # Update conversations under lock
     updated = 0
     with conversations_lock:
         for uid, texts in results:
@@ -235,7 +223,6 @@ async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit
                 conversations[uid] = texts
                 updated += 1
 
-    # Drain incoming_queue into conversations as well
     drained = []
     while True:
         try:
@@ -249,12 +236,10 @@ async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit
         with conversations_lock:
             conversations.setdefault(author.id, []).append(f"{author}: {content}")
         drained.append((author, content))
-        # ensure known users persisted
         known = set(load_known_users())
         known.add(author.id)
         await save_known_users(sorted(list(known)))
 
-    # Persist conversations
     await save_conversations()
     logger.info("Reload complete: updated %d conversations, drained %d queued messages", updated, len(drained))
     return {"updated": updated, "drained": len(drained)}
@@ -326,7 +311,6 @@ def drain_incoming_queue_to_conversations():
         with conversations_lock:
             conversations.setdefault(author.id, []).append(f"{author}: {content}")
         drained.append((author, content))
-        # persist known user
         known = set(load_known_users())
         known.add(author.id)
         save_known_users_sync(sorted(list(known)))
@@ -335,15 +319,15 @@ def drain_incoming_queue_to_conversations():
     return drained
 
 def run_cli(loop: asyncio.AbstractEventLoop):
-    """
-    CLI runs in a separate thread. Long-running async tasks are scheduled on the asyncio loop.
-    The reload operation is scheduled as a background task and returns immediately.
-    """
     reload_future = None
-
     try:
+        # Wait a short time for bot to become ready (if not already)
+        if bot_ready_event is not None and not bot_ready_event.is_set():
+            print("Waiting for bot to connect... (you can wait or press Enter to continue)")
+            # Wait up to 10 seconds for ready; if not ready, continue but logs will be on stderr
+            bot_ready_event.wait(timeout=10)
+
         while not shutdown_event.is_set():
-            # Drain any incoming messages first
             drained = drain_incoming_queue_to_conversations()
             if drained:
                 print(f"Drained {len(drained)} incoming messages into conversations.")
@@ -373,7 +357,6 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                         fut.result(timeout=20)
                         with conversations_lock:
                             conversations.setdefault(uid, []).append(f"You: {reply}")
-                        # persist
                         asyncio.run_coroutine_threadsafe(save_conversations(), loop)
                         known = set(load_known_users())
                         known.add(uid)
@@ -416,7 +399,6 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                     save_token(new_token)
                     print("Token saved. Please restart the program to use the new token.")
                     input("Press Enter to exit...")
-                    # signal shutdown
                     shutdown_event.set()
                     try:
                         asyncio.run_coroutine_threadsafe(client.close(), loop)
@@ -428,24 +410,20 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                     input("Press Enter to return to menu...")
 
             elif choice == "5":
-                # Start reload in background if not already running
                 if reload_future and not reload_future.done():
-                    print("Reload already running in background. You can check logs for progress.")
+                    print("Reload already running in background. Check logs for progress.")
                 else:
                     print("Scheduling reload of full histories in background...")
                     reload_future = asyncio.run_coroutine_threadsafe(
                         reload_all_histories(semaphore_limit=HISTORY_CONCURRENCY, limit_per_channel=HISTORY_FETCH_LIMIT),
                         loop
                     )
-                    # Do not block; user can continue using CLI. Optionally wait a short time to confirm it started.
                     try:
-                        # quick check for immediate failure
                         reload_future.result(timeout=1)
                         print("Reload completed very quickly.")
                     except asyncio.TimeoutError:
                         print("Reload started; it will run in background. Check logs for progress.")
                     except Exception:
-                        # If it raised immediately, show error
                         try:
                             res = reload_future.result(timeout=1)
                             print("Reload result:", res)
@@ -495,21 +473,33 @@ def run_cli(loop: asyncio.AbstractEventLoop):
 
 # ---------------- Main entrypoint ----------------
 async def main():
-    # Load persisted conversations synchronously in thread to avoid blocking event loop
+    global bot_ready_event
+    bot_ready_event = asyncio.Event()
+
+    # Load persisted conversations before starting
     await asyncio.to_thread(load_conversations_sync)
 
     token = get_token_interactive()
     loop = asyncio.get_running_loop()
 
-    # Start CLI in a separate thread
+    # Start the discord client as a background task so we can wait for readiness
+    client_task = asyncio.create_task(client.start(token))
+
+    # Wait for on_ready to set the event (with a timeout to avoid hanging forever)
+    try:
+        await asyncio.wait_for(bot_ready_event.wait(), timeout=15)
+        logger.info("Bot signaled ready; starting CLI.")
+    except asyncio.TimeoutError:
+        logger.warning("Bot did not become ready within timeout; starting CLI anyway. Logs will appear on stderr.")
+
+    # Start CLI in a separate thread after waiting for readiness (or timeout)
     cli_thread = threading.Thread(target=run_cli, args=(loop,), daemon=True)
     cli_thread.start()
 
-    # Start the discord client (this will run until closed)
+    # Wait for the client task to finish (it runs until closed)
     try:
-        await client.start(token)
+        await client_task
     finally:
-        # Signal CLI to exit and join thread
         shutdown_event.set()
         if cli_thread.is_alive():
             cli_thread.join(timeout=2)
