@@ -5,6 +5,7 @@ import json
 import os
 import curses
 import subprocess
+import textwrap
 from typing import List, Optional
 
 CONFIG_FILE = "config.json"
@@ -54,7 +55,6 @@ def save_known_users(user_ids: List[int]):
 def load_conversations():
     global conversations
     data = load_json(CONVERSATIONS_FILE, {})
-    # ensure keys are ints
     conversations = {int(k): v for k, v in data.items()}
 
 
@@ -101,7 +101,6 @@ async def send_reply(uid: int, reply: str) -> None:
 async def on_ready():
     global bot_status
     bot_status = f"Connected as {client.user}"
-    # load persisted conversations on ready
     load_conversations()
 
 
@@ -109,24 +108,39 @@ async def on_ready():
 async def on_message(message):
     global unread_count
     if isinstance(message.channel, discord.DMChannel) and not message.author.bot:
-        # queue for UI
         await message_queue.put((message.author, message.content))
         unread_count += 1
-        # update in-memory conversations
         conversations.setdefault(message.author.id, []).append(f"{message.author}: {message.content}")
-        # persist conversations and known users
         save_conversations()
         known = set(load_known_users())
         known.add(message.author.id)
         save_known_users(sorted(list(known)))
 
 
+# ---------------- UI HELPERS ----------------
+def draw_wrapped(stdscr, start_row: int, start_col: int, text: str, max_width: int) -> int:
+    """
+    Draw `text` on `stdscr` starting at (start_row, start_col), wrapping to max_width.
+    Returns the next row after the drawn text.
+    """
+    paragraphs = text.splitlines() or [""]
+    row = start_row
+    for para in paragraphs:
+        if not para:
+            row += 1
+            continue
+        wrapped = textwrap.wrap(para, width=max_width) or [""]
+        for line in wrapped:
+            try:
+                stdscr.addstr(row, start_col, line)
+            except Exception:
+                stdscr.addstr(row, start_col, line[:max_width])
+            row += 1
+    return row
+
+
 # ---------------- TERMINAL UI ----------------
 def terminal_ui(stdscr, loop):
-    """
-    Synchronous curses UI. Async actions are scheduled back onto the event loop
-    using asyncio.run_coroutine_threadsafe(..., loop).
-    """
     global unread_count, bot_status, conversations
 
     curses.curs_set(0)
@@ -162,12 +176,10 @@ def terminal_ui(stdscr, loop):
             stdscr.addstr(0, 0, "=== Conversations ===", curses.A_BOLD)
             row = 2
             if not conversations:
-                stdscr.addstr(row, 0, "No conversations available.")
-                row += 1
+                row = draw_wrapped(stdscr, row, 0, "No conversations available.", curses.COLS - 1)
             else:
                 for uid, msgs in conversations.items():
-                    stdscr.addstr(row, 0, f"User {uid}: {len(msgs)} messages")
-                    row += 1
+                    row = draw_wrapped(stdscr, row, 0, f"User {uid}: {len(msgs)} messages", curses.COLS - 1)
             stdscr.addstr(row + 1, 0, "Press any key to return...")
             stdscr.getch()
 
@@ -186,15 +198,10 @@ def terminal_ui(stdscr, loop):
                 stdscr.addstr(0, 0, f"=== Conversation with {uid} ===", curses.A_BOLD)
                 row = 2
                 if not msgs:
-                    stdscr.addstr(row, 0, "No messages in this conversation.")
-                    row += 1
+                    row = draw_wrapped(stdscr, row, 0, "No messages in this conversation.", curses.COLS - 1)
                 else:
-                    for msg in msgs[-20:]:
-                        try:
-                            stdscr.addstr(row, 0, msg[:curses.COLS - 1])
-                        except Exception:
-                            stdscr.addstr(row, 0, msg[:80])
-                        row += 1
+                    for msg in msgs[-200:]:
+                        row = draw_wrapped(stdscr, row, 0, msg, curses.COLS - 1)
                 stdscr.addstr(row + 1, 0, "Type reply: ")
                 stdscr.refresh()
                 curses.echo()
@@ -228,7 +235,6 @@ def terminal_ui(stdscr, loop):
                 if msg:
                     asyncio.run_coroutine_threadsafe(send_reply(user_id, msg), loop)
                     conversations.setdefault(user_id, []).append(f"You: {msg}")
-                    # persist known user and conversations
                     known = set(load_known_users())
                     known.add(user_id)
                     save_known_users(sorted(list(known)))
@@ -266,24 +272,19 @@ def terminal_ui(stdscr, loop):
                 found_any = False
                 for uid in known_ids:
                     try:
-                        # fetch user and ensure DM channel exists
                         user = asyncio.run_coroutine_threadsafe(client.fetch_user(uid), loop).result()
                         channel = user.dm_channel or asyncio.run_coroutine_threadsafe(user.create_dm(), loop).result()
                         if channel is None:
                             continue
                         found_any = True
-                        # fetch history
                         history_future = asyncio.run_coroutine_threadsafe(fetch_channel_history(channel), loop)
                         history = history_future.result()
-                        # populate conversation oldest-first
                         conversations[uid] = []
                         for msg in history:
                             conversations[uid].append(f"{msg.author}: {msg.content}")
                     except Exception:
-                        # skip problematic user but continue
                         continue
 
-                # Also include any DM channels the client already knows about
                 for channel in client.private_channels:
                     if isinstance(channel, discord.DMChannel):
                         recipient = channel.recipient
@@ -294,19 +295,16 @@ def terminal_ui(stdscr, loop):
                                 history = history_future.result()
                                 conversations[uid] = [f"{m.author}: {m.content}" for m in history]
                                 found_any = True
-                                # persist known user
                                 known = set(load_known_users())
                                 known.add(uid)
                                 save_known_users(sorted(list(known)))
 
-                # Drain message_queue into conversations
                 drained = []
                 while not message_queue.empty():
                     author, content = message_queue.get_nowait()
                     unread_count -= 1
                     conversations.setdefault(author.id, []).append(f"{author}: {content}")
                     drained.append((author, content))
-                    # persist known user
                     known = set(load_known_users())
                     known.add(author.id)
                     save_known_users(sorted(list(known)))
@@ -333,16 +331,11 @@ def terminal_ui(stdscr, loop):
                 )
                 out = result.stdout.strip() or "(no output)"
                 err = result.stderr.strip()
-                try:
-                    stdscr.addstr(2, 0, out[:curses.COLS - 1])
-                except Exception:
-                    stdscr.addstr(2, 0, out[:80])
+                row = 2
+                row = draw_wrapped(stdscr, row, 0, out, curses.COLS - 1)
                 if err:
-                    try:
-                        stdscr.addstr(4, 0, err[:curses.COLS - 1])
-                    except Exception:
-                        stdscr.addstr(4, 0, err[:80])
-                stdscr.addstr(6, 0, "Update complete. Press any key...")
+                    row = draw_wrapped(stdscr, row + 1, 0, err, curses.COLS - 1)
+                stdscr.addstr(row + 1, 0, "Update complete. Press any key...")
             except Exception as e:
                 stdscr.addstr(2, 0, f"Error: {e}")
                 stdscr.addstr(4, 0, "Press any key...")
@@ -363,12 +356,9 @@ def run_curses(loop):
 
 # ---------------- MAIN ----------------
 async def main():
-    # load persisted conversations and known users early
     load_conversations()
     token = get_token_interactive()
     loop = asyncio.get_running_loop()
-
-    # Start UI in a separate thread and the bot concurrently
     await asyncio.gather(
         asyncio.to_thread(run_curses, loop),
         client.start(token)
