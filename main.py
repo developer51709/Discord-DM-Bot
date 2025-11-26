@@ -74,7 +74,8 @@ def terminal_ui(stdscr, loop):
     while True:
         stdscr.clear()
         stdscr.addstr(0, 0, "=== Discord DM Relay Bot ===", curses.A_BOLD)
-        stdscr.addstr(1, 0, f"Unread Messages: {unread_count}", curses.A_REVERSE)
+        stdscr.addstr(1, 0, f"{bot_status}", curses.A_DIM)
+        stdscr.addstr(2, 0, f"Unread Messages: {unread_count}", curses.A_REVERSE)
 
         stdscr.addstr(3, 0, "Menu:")
         stdscr.addstr(4, 2, "1. Conversations")
