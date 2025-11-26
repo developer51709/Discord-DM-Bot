@@ -85,7 +85,7 @@ def terminal_ui(stdscr, loop):
         stdscr.addstr(6, 2, "2. Select Conversation")
         stdscr.addstr(7, 2, "3. New Conversation")
         stdscr.addstr(8, 2, "4. Change Token")
-        stdscr.addstr(9, 2, "5. Refresh Messages")
+        stdscr.addstr(9, 2, "5. Reload Messages (Full History)")
         stdscr.addstr(10, 2, "6. GitHub Update")
         stdscr.addstr(11, 2, "7. Exit")
 
@@ -95,7 +95,7 @@ def terminal_ui(stdscr, loop):
         curses.echo()
         choice = stdscr.getstr(13, 15).decode("utf-8").strip()
         curses.noecho()
-        
+
         if choice == "1":
             stdscr.clear()
             stdscr.addstr(0, 0, "=== Conversations ===", curses.A_BOLD)
@@ -178,19 +178,16 @@ def terminal_ui(stdscr, loop):
         elif choice == "5":  # Reload Messages
             stdscr.clear()
             stdscr.addstr(0, 0, "=== Reload Messages (Full History) ===", curses.A_BOLD)
-
             try:
-                # Loop through all known conversations
                 for uid in list(conversations.keys()):
                     user = asyncio.run_coroutine_threadsafe(client.fetch_user(uid), loop).result()
                     channel = user.dm_channel or asyncio.run_coroutine_threadsafe(user.create_dm(), loop).result()
 
-                    # Fetch full history
-                    history = asyncio.run_coroutine_threadsafe(channel.history(limit=None).flatten(), loop).result()
-
-                    # Reset conversation log
                     conversations[uid] = []
-                    for msg in history:
+                    history_future = asyncio.run_coroutine_threadsafe(channel.history(limit=None).flatten(), loop)
+                    history = history_future.result()
+
+                    for msg in reversed(history):  # oldest first
                         conversations[uid].append(f"{msg.author}: {msg.content}")
 
                 stdscr.addstr(2, 0, "Reload complete. Full message history pulled.")
@@ -241,8 +238,4 @@ async def main():
     token = await get_valid_token()
     loop = asyncio.get_running_loop()
     await asyncio.gather(
-        client.connect(),
-        asyncio.to_thread(run_curses, loop)
-    )
-
-asyncio.run(main())
+        client
