@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import curses
+import subprocess
 
 CONFIG_FILE = "config.json"
 
@@ -15,6 +16,7 @@ client = discord.Client(intents=intents)
 message_queue = asyncio.Queue()
 unread_count = 0
 conversations = {}
+bot_status = ""
 
 
 # ---------------- CONFIG MANAGEMENT ----------------
@@ -53,7 +55,8 @@ async def get_valid_token():
 # ---------------- DISCORD EVENTS ----------------
 @client.event
 async def on_ready():
-    print(f"Bot connected as {client.user}")
+    global bot_status
+    bot_status = f"Connected as {client.user}"
 
 
 @client.event
@@ -67,28 +70,29 @@ async def on_message(message):
 
 # ---------------- TERMINAL UI ----------------
 def terminal_ui(stdscr, loop):
-    global unread_count
+    global unread_count, bot_status
     curses.curs_set(0)
     stdscr.nodelay(False)
 
     while True:
         stdscr.clear()
         stdscr.addstr(0, 0, "=== Discord DM Relay Bot ===", curses.A_BOLD)
-        stdscr.addstr(1, 0, f"{bot_status}", curses.A_DIM)
+        stdscr.addstr(1, 0, bot_status, curses.A_DIM)
         stdscr.addstr(2, 0, f"Unread Messages: {unread_count}", curses.A_REVERSE)
 
-        stdscr.addstr(3, 0, "Menu:")
-        stdscr.addstr(4, 2, "1. Conversations")
-        stdscr.addstr(5, 2, "2. Select Conversation")
-        stdscr.addstr(6, 2, "3. New Conversation")
-        stdscr.addstr(7, 2, "4. Change Token")
-        stdscr.addstr(8, 2, "5. Update")
-        stdscr.addstr(9, 2, "6. Exit")
+        stdscr.addstr(4, 0, "Menu:")
+        stdscr.addstr(5, 2, "1. Conversations")
+        stdscr.addstr(6, 2, "2. Select Conversation")
+        stdscr.addstr(7, 2, "3. New Conversation")
+        stdscr.addstr(8, 2, "4. Change Token")
+        stdscr.addstr(9, 2, "5. Update (refresh messages)")
+        stdscr.addstr(10, 2, "6. GitHub Update")
+        stdscr.addstr(11, 2, "7. Exit")
 
-        stdscr.addstr(11, 0, "Select option: ")
+        stdscr.addstr(13, 0, "Select option: ")
         stdscr.refresh()
 
-        choice = stdscr.getstr(11, 15).decode("utf-8").strip()
+        choice = stdscr.getstr(13, 15).decode("utf-8").strip()
 
         if choice == "1":
             stdscr.clear()
@@ -133,7 +137,6 @@ def terminal_ui(stdscr, loop):
             stdscr.addstr(2, 0, "Enter user ID: ")
             stdscr.refresh()
             uid = stdscr.getstr(2, 15).decode("utf-8").strip()
-            msg = ""
             try:
                 user_id = int(uid)
                 stdscr.addstr(3, 0, "Enter message: ")
@@ -162,21 +165,49 @@ def terminal_ui(stdscr, loop):
 
         elif choice == "5":
             stdscr.clear()
-            stdscr.addstr(0, 0, "=== Update ===", curses.A_BOLD)
-            stdscr.addstr(2, 0, f"Unread Messages: {unread_count}")
-            if unread_count > 0:
-                stdscr.addstr(4, 0, "New messages available. Check Conversations or Select Conversation.")
+            stdscr.addstr(0, 0, "=== Update (refresh messages) ===", curses.A_BOLD)
+            new_msgs = []
+            while not message_queue.empty():
+                author, content = message_queue.get_nowait()
+                unread_count -= 1
+                conversations.setdefault(author.id, []).append(f"{author}: {content}")
+                new_msgs.append((author, content))
+
+            if new_msgs:
+                row = 2
+                for author, content in new_msgs:
+                    stdscr.addstr(row, 0, f"From {author}: {content}")
+                    row += 1
             else:
+                stdscr.addstr(2, 0, f"Unread Messages: {unread_count}")
                 stdscr.addstr(4, 0, "No new messages.")
+
             stdscr.addstr(6, 0, "Press any key to return...")
             stdscr.getch()
 
         elif choice == "6":
+            stdscr.clear()
+            stdscr.addstr(0, 0, "=== GitHub Update ===", curses.A_BOLD)
+            try:
+                result = subprocess.run(
+                    ["git", "pull", "origin", "main"],
+                    capture_output=True, text=True, cwd=os.path.expanduser("~/Discord-DM-Bot")
+                )
+                stdscr.addstr(2, 0, result.stdout)
+                if result.stderr:
+                    stdscr.addstr(4, 0, result.stderr)
+                stdscr.addstr(6, 0, "Update complete. Press any key...")
+            except Exception as e:
+                stdscr.addstr(2, 0, f"Error: {e}")
+                stdscr.addstr(4, 0, "Press any key...")
+            stdscr.getch()
+
+        elif choice == "7":
             asyncio.run_coroutine_threadsafe(client.close(), loop)
             break
 
         else:
-            stdscr.addstr(13, 0, "Invalid choice. Press any key...")
+            stdscr.addstr(15, 0, "Invalid choice. Press any key...")
             stdscr.getch()
 
 
