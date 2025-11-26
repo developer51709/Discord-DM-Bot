@@ -12,15 +12,34 @@ import logging
 import sys
 from typing import List, Optional
 
+# Color support
+try:
+    from colorama import init as colorama_init, Fore, Style
+    colorama_init(autoreset=True)
+    COLORAMA_AVAILABLE = True
+except Exception:
+    COLORAMA_AVAILABLE = False
+    # Fallback no-op values
+    class _F:
+        RESET = ""
+        RED = ""
+        GREEN = ""
+        YELLOW = ""
+        CYAN = ""
+        MAGENTA = ""
+        BLUE = ""
+        WHITE = ""
+    Fore = _F()
+    Style = _F()
+
 # ---------------- Configuration ----------------
 CONFIG_FILE = "config.json"
 KNOWN_USERS_FILE = "known_users.json"
 CONVERSATIONS_FILE = "conversations.json"
 
-# Limits and throttles
-HISTORY_FETCH_LIMIT = None  # None = fetch all; set to an int to limit messages per DM
-HISTORY_CONCURRENCY = 3     # concurrent DM history fetches
-HISTORY_FETCH_TIMEOUT = 120  # seconds for the whole reload task
+HISTORY_FETCH_LIMIT = None
+HISTORY_CONCURRENCY = 3
+HISTORY_FETCH_TIMEOUT = 120
 
 # ---------------- Logging (to stderr) ----------------
 handler = logging.StreamHandler(sys.stderr)
@@ -51,7 +70,6 @@ shutdown_event = threading.Event()
 bot_status = ""
 bot_status_lock = threading.Lock()
 
-# Event to signal the bot is ready
 bot_ready_event: Optional[asyncio.Event] = None
 
 # ---------------- Utility: atomic save ----------------
@@ -153,9 +171,7 @@ async def on_ready():
     with bot_status_lock:
         bot_status = f"Connected as {client.user}"
     logger.info("Bot ready: %s", client.user)
-    # load persisted conversations
     await asyncio.to_thread(load_conversations_sync)
-    # signal readiness to the main thread
     if bot_ready_event is not None and not bot_ready_event.is_set():
         bot_ready_event.set()
 
@@ -173,7 +189,7 @@ async def on_message(message):
         known.add(message.author.id)
         asyncio.create_task(save_known_users(sorted(list(known))))
 
-# ---------------- Reload task (unchanged core) ----------------
+# ---------------- Reload task ----------------
 async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit_per_channel: Optional[int] = HISTORY_FETCH_LIMIT):
     logger.info("Starting reload_all_histories (limit=%s, concurrency=%s)", limit_per_channel, semaphore_limit)
     sem = asyncio.Semaphore(semaphore_limit)
@@ -244,6 +260,37 @@ async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit
     logger.info("Reload complete: updated %d conversations, drained %d queued messages", updated, len(drained))
     return {"updated": updated, "drained": len(drained)}
 
+# ---------------- Color helpers ----------------
+def c_header(text: str):
+    if COLORAMA_AVAILABLE:
+        return f"{Style.BRIGHT}{Fore.CYAN}{text}{Style.RESET_ALL}"
+    return text
+
+def c_info(text: str):
+    if COLORAMA_AVAILABLE:
+        return f"{Fore.BLUE}{text}{Style.RESET_ALL}"
+    return text
+
+def c_success(text: str):
+    if COLORAMA_AVAILABLE:
+        return f"{Fore.GREEN}{text}{Style.RESET_ALL}"
+    return text
+
+def c_warn(text: str):
+    if COLORAMA_AVAILABLE:
+        return f"{Fore.YELLOW}{text}{Style.RESET_ALL}"
+    return text
+
+def c_error(text: str):
+    if COLORAMA_AVAILABLE:
+        return f"{Fore.RED}{Style.BRIGHT}{text}{Style.RESET_ALL}"
+    return text
+
+def c_prompt(text: str):
+    if COLORAMA_AVAILABLE:
+        return f"{Fore.MAGENTA}{text}{Style.RESET_ALL}"
+    return text
+
 # ---------------- CLI (synchronous) ----------------
 def wrap_text(text: str, width: int = 80) -> str:
     paragraphs = text.splitlines() or [""]
@@ -255,47 +302,53 @@ def wrap_text(text: str, width: int = 80) -> str:
             wrapped.extend(textwrap.wrap(p, width=width) or [""])
     return "\n".join(wrapped)
 
+def clear_screen():
+    if os.name == "nt":
+        os.system("cls")
+    else:
+        os.system("clear")
+
 def print_header():
-    print("=" * 80)
-    print("Discord DM Relay Bot".center(80))
-    print("=" * 80)
+    print(c_header("=" * 80))
+    print(c_header("Discord DM Relay Bot".center(80)))
+    print(c_header("=" * 80))
 
 def show_menu():
     print_header()
     with bot_status_lock:
         status = bot_status
-    print(f"Status: {status}")
+    print(c_info(f"Status: {status}"))
     with unread_lock:
         uc = unread_count
-    print(f"Unread messages: {uc}")
+    print(c_warn(f"Unread messages: {uc}"))
     print()
-    print("Menu:")
-    print("1) Conversations")
-    print("2) Select Conversation")
-    print("3) New Conversation")
-    print("4) Change Token")
-    print("5) Reload Messages (Full History) [runs in background]")
-    print("6) GitHub Update")
-    print("7) Exit")
+    print(c_prompt("Menu:"))
+    print(c_info("1) Conversations"))
+    print(c_info("2) Select Conversation"))
+    print(c_info("3) New Conversation"))
+    print(c_info("4) Change Token"))
+    print(c_info("5) Reload Messages (Full History) [runs in background]"))
+    print(c_info("6) GitHub Update"))
+    print(c_info("7) Exit"))
     print()
 
 def list_conversations():
     with conversations_lock:
         if not conversations:
-            print("No conversations available.")
+            print(c_warn("No conversations available."))
             return
         for uid, msgs in conversations.items():
-            print(f"- User {uid}: {len(msgs)} messages")
+            print(c_info(f"- User {uid}: {len(msgs)} messages"))
 
 def show_conversation(uid: int):
     with conversations_lock:
         msgs = conversations.get(uid, [])
     if not msgs:
-        print("No messages in this conversation.")
+        print(c_warn("No messages in this conversation."))
         return
     for msg in msgs[-200:]:
         print(wrap_text(msg, width=80))
-        print("-" * 40)
+        print(c_info("-" * 40))
 
 def drain_incoming_queue_to_conversations():
     drained = []
@@ -321,36 +374,38 @@ def drain_incoming_queue_to_conversations():
 def run_cli(loop: asyncio.AbstractEventLoop):
     reload_future = None
     try:
-        # Wait a short time for bot to become ready (if not already)
         if bot_ready_event is not None and not bot_ready_event.is_set():
-            print("Waiting for bot to connect... (you can wait or press Enter to continue)")
-            # Wait up to 10 seconds for ready; if not ready, continue but logs will be on stderr
+            clear_screen()
+            print(c_info("Waiting for bot to connect... (you can wait or press Enter to continue)"))
             bot_ready_event.wait(timeout=10)
 
         while not shutdown_event.is_set():
+            clear_screen()
             drained = drain_incoming_queue_to_conversations()
             if drained:
-                print(f"Drained {len(drained)} incoming messages into conversations.")
+                print(c_success(f"Drained {len(drained)} incoming messages into conversations."))
 
             show_menu()
-            choice = input("Select option: ").strip()
+            choice = input(c_prompt("Select option: ")).strip()
 
             if choice == "1":
-                print("\n=== Conversations ===")
+                clear_screen()
+                print(c_header("=== Conversations ==="))
                 list_conversations()
-                input("\nPress Enter to return to menu...")
+                input(c_prompt("\nPress Enter to return to menu..."))
 
             elif choice == "2":
-                uid_raw = input("Enter user ID: ").strip()
+                uid_raw = input(c_prompt("Enter user ID: ")).strip()
                 try:
                     uid = int(uid_raw)
                 except ValueError:
-                    print("Invalid user ID.")
-                    input("Press Enter to continue...")
+                    print(c_error("Invalid user ID."))
+                    input(c_prompt("Press Enter to continue..."))
                     continue
-                print(f"\n=== Conversation with {uid} ===")
+                clear_screen()
+                print(c_header(f"=== Conversation with {uid} ==="))
                 show_conversation(uid)
-                reply = input("\nType reply (leave blank to skip): ").strip()
+                reply = input(c_prompt("\nType reply (leave blank to skip): ")).strip()
                 if reply:
                     fut = asyncio.run_coroutine_threadsafe(send_reply(uid, reply), loop)
                     try:
@@ -361,23 +416,23 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                         known = set(load_known_users())
                         known.add(uid)
                         asyncio.run_coroutine_threadsafe(save_known_users(sorted(list(known))), loop)
-                        print("Reply sent.")
+                        print(c_success("Reply sent."))
                     except Exception as e:
-                        print(f"Failed to send reply: {e}")
-                input("Press Enter to return to menu...")
+                        print(c_error(f"Failed to send reply: {e}"))
+                input(c_prompt("Press Enter to return to menu..."))
 
             elif choice == "3":
-                uid_raw = input("Enter user ID: ").strip()
+                uid_raw = input(c_prompt("Enter user ID: ")).strip()
                 try:
                     uid = int(uid_raw)
                 except ValueError:
-                    print("Invalid user ID.")
-                    input("Press Enter to continue...")
+                    print(c_error("Invalid user ID."))
+                    input(c_prompt("Press Enter to continue..."))
                     continue
-                msg = input("Enter message: ").strip()
+                msg = input(c_prompt("Enter message: ")).strip()
                 if not msg:
-                    print("No message entered.")
-                    input("Press Enter to continue...")
+                    print(c_warn("No message entered."))
+                    input(c_prompt("Press Enter to continue..."))
                     continue
                 fut = asyncio.run_coroutine_threadsafe(send_reply(uid, msg), loop)
                 try:
@@ -388,17 +443,17 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                     known = set(load_known_users())
                     known.add(uid)
                     asyncio.run_coroutine_threadsafe(save_known_users(sorted(list(known))), loop)
-                    print("Message sent.")
+                    print(c_success("Message sent."))
                 except Exception as e:
-                    print(f"Failed to send message: {e}")
-                input("Press Enter to return to menu...")
+                    print(c_error(f"Failed to send message: {e}"))
+                input(c_prompt("Press Enter to return to menu..."))
 
             elif choice == "4":
-                new_token = input("Enter new bot token: ").strip()
+                new_token = input(c_prompt("Enter new bot token: ")).strip()
                 if new_token:
                     save_token(new_token)
-                    print("Token saved. Please restart the program to use the new token.")
-                    input("Press Enter to exit...")
+                    print(c_success("Token saved. Please restart the program to use the new token."))
+                    input(c_prompt("Press Enter to exit..."))
                     shutdown_event.set()
                     try:
                         asyncio.run_coroutine_threadsafe(client.close(), loop)
@@ -406,33 +461,33 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                         pass
                     break
                 else:
-                    print("No token entered.")
-                    input("Press Enter to return to menu...")
+                    print(c_warn("No token entered."))
+                    input(c_prompt("Press Enter to return to menu..."))
 
             elif choice == "5":
                 if reload_future and not reload_future.done():
-                    print("Reload already running in background. Check logs for progress.")
+                    print(c_warn("Reload already running in background. Check logs for progress."))
                 else:
-                    print("Scheduling reload of full histories in background...")
+                    print(c_info("Scheduling reload of full histories in background..."))
                     reload_future = asyncio.run_coroutine_threadsafe(
                         reload_all_histories(semaphore_limit=HISTORY_CONCURRENCY, limit_per_channel=HISTORY_FETCH_LIMIT),
                         loop
                     )
                     try:
                         reload_future.result(timeout=1)
-                        print("Reload completed very quickly.")
+                        print(c_success("Reload completed very quickly."))
                     except asyncio.TimeoutError:
-                        print("Reload started; it will run in background. Check logs for progress.")
+                        print(c_info("Reload started; it will run in background. Check logs for progress."))
                     except Exception:
                         try:
                             res = reload_future.result(timeout=1)
-                            print("Reload result:", res)
+                            print(c_info(f"Reload result: {res}"))
                         except Exception as e:
-                            print("Reload failed to start:", e)
-                input("Press Enter to return to menu...")
+                            print(c_error(f"Reload failed to start: {e}"))
+                input(c_prompt("Press Enter to return to menu..."))
 
             elif choice == "6":
-                print("\nRunning git pull in ~/Discord-DM-Bot ...")
+                print(c_info("\nRunning git pull in ~/Discord-DM-Bot ..."))
                 try:
                     result = subprocess.run(
                         ["git", "pull", "origin", "main"],
@@ -440,18 +495,18 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                     )
                     out = result.stdout.strip() or "(no output)"
                     err = result.stderr.strip()
-                    print("\n--- git output ---")
+                    print(c_info("\n--- git output ---"))
                     print(out)
                     if err:
-                        print("\n--- git errors ---")
+                        print(c_error("\n--- git errors ---"))
                         print(err)
-                    print("\nUpdate complete.")
+                    print(c_success("\nUpdate complete."))
                 except Exception as e:
-                    print(f"Git update failed: {e}")
-                input("Press Enter to return to menu...")
+                    print(c_error(f"Git update failed: {e}"))
+                input(c_prompt("Press Enter to return to menu..."))
 
             elif choice == "7":
-                print("Exiting...")
+                print(c_info("Exiting..."))
                 shutdown_event.set()
                 try:
                     asyncio.run_coroutine_threadsafe(client.close(), loop)
@@ -460,8 +515,8 @@ def run_cli(loop: asyncio.AbstractEventLoop):
                 break
 
             else:
-                print("Invalid choice.")
-                input("Press Enter to continue...")
+                print(c_error("Invalid choice."))
+                input(c_prompt("Press Enter to continue..."))
 
     except KeyboardInterrupt:
         logger.info("CLI interrupted by user.")
@@ -476,27 +531,22 @@ async def main():
     global bot_ready_event
     bot_ready_event = asyncio.Event()
 
-    # Load persisted conversations before starting
     await asyncio.to_thread(load_conversations_sync)
 
     token = get_token_interactive()
     loop = asyncio.get_running_loop()
 
-    # Start the discord client as a background task so we can wait for readiness
     client_task = asyncio.create_task(client.start(token))
 
-    # Wait for on_ready to set the event (with a timeout to avoid hanging forever)
     try:
         await asyncio.wait_for(bot_ready_event.wait(), timeout=15)
         logger.info("Bot signaled ready; starting CLI.")
     except asyncio.TimeoutError:
         logger.warning("Bot did not become ready within timeout; starting CLI anyway. Logs will appear on stderr.")
 
-    # Start CLI in a separate thread after waiting for readiness (or timeout)
     cli_thread = threading.Thread(target=run_cli, args=(loop,), daemon=True)
     cli_thread.start()
 
-    # Wait for the client task to finish (it runs until closed)
     try:
         await client_task
     finally:
