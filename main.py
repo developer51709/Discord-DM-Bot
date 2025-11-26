@@ -82,12 +82,13 @@ async def terminal_ui(stdscr):
         stdscr.addstr(5, 2, "2. Select Conversation")
         stdscr.addstr(6, 2, "3. New Conversation")
         stdscr.addstr(7, 2, "4. Change Token")
-        stdscr.addstr(8, 2, "5. Exit")
+        stdscr.addstr(8, 2, "5. Update")
+        stdscr.addstr(9, 2, "6. Exit")
 
-        stdscr.addstr(10, 0, "Select option: ")
+        stdscr.addstr(11, 0, "Select option: ")
         stdscr.refresh()
 
-        choice = stdscr.getstr(10, 15).decode("utf-8").strip()
+        choice = stdscr.getstr(11, 15).decode("utf-8").strip()
 
         if choice == "1":
             stdscr.clear()
@@ -154,10 +155,22 @@ async def terminal_ui(stdscr):
             return
 
         elif choice == "5":
+            # Update option: refresh unread count and show any new messages
+            stdscr.clear()
+            stdscr.addstr(0, 0, "=== Update ===", curses.A_BOLD)
+            stdscr.addstr(2, 0, f"Unread Messages: {unread_count}")
+            if unread_count > 0:
+                stdscr.addstr(4, 0, "New messages available. Check Conversations or Select Conversation.")
+            else:
+                stdscr.addstr(4, 0, "No new messages.")
+            stdscr.addstr(6, 0, "Press any key to return...")
+            stdscr.getch()
+
+        elif choice == "6":
             break
 
         else:
-            stdscr.addstr(12, 0, "Invalid choice. Press any key...")
+            stdscr.addstr(13, 0, "Invalid choice. Press any key...")
             stdscr.getch()
 
 
