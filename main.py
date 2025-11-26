@@ -310,7 +310,7 @@ def clear_screen():
 
 def print_header():
     print(c_header("=" * 50))
-    print(c_header("Discord DM Relay Bot".center(80)))
+    print(c_header("Discord DM Relay Bot".center(50)))
     print(c_header("=" * 50))
 
 def show_menu():
