@@ -85,7 +85,7 @@ def terminal_ui(stdscr, loop):
         stdscr.addstr(6, 2, "2. Select Conversation")
         stdscr.addstr(7, 2, "3. New Conversation")
         stdscr.addstr(8, 2, "4. Change Token")
-        stdscr.addstr(9, 2, "5. Update (refresh messages)")
+        stdscr.addstr(9, 2, "5. Refresh Messages")
         stdscr.addstr(10, 2, "6. GitHub Update")
         stdscr.addstr(11, 2, "7. Exit")
 
@@ -175,26 +175,29 @@ def terminal_ui(stdscr, loop):
             asyncio.run_coroutine_threadsafe(client.close(), loop)
             break
 
-        elif choice == "5":
+        elif choice == "5":  # Reload Messages
             stdscr.clear()
-            stdscr.addstr(0, 0, "=== Update (refresh messages) ===", curses.A_BOLD)
-            new_msgs = []
-            while not message_queue.empty():
-                author, content = message_queue.get_nowait()
-                unread_count -= 1
-                conversations.setdefault(author.id, []).append(f"{author}: {content}")
-                new_msgs.append((author, content))
+            stdscr.addstr(0, 0, "=== Reload Messages (Full History) ===", curses.A_BOLD)
 
-            if new_msgs:
-                row = 2
-                for author, content in new_msgs:
-                    stdscr.addstr(row, 0, f"From {author}: {content}")
-                    row += 1
-            else:
-                stdscr.addstr(2, 0, f"Unread Messages: {unread_count}")
-                stdscr.addstr(4, 0, "No new messages.")
+            try:
+                # Loop through all known conversations
+                for uid in list(conversations.keys()):
+                    user = asyncio.run_coroutine_threadsafe(client.fetch_user(uid), loop).result()
+                    channel = user.dm_channel or asyncio.run_coroutine_threadsafe(user.create_dm(), loop).result()
 
-            stdscr.addstr(6, 0, "Press any key to return...")
+                    # Fetch full history
+                    history = asyncio.run_coroutine_threadsafe(channel.history(limit=None).flatten(), loop).result()
+
+                    # Reset conversation log
+                    conversations[uid] = []
+                    for msg in history:
+                        conversations[uid].append(f"{msg.author}: {msg.content}")
+
+                stdscr.addstr(2, 0, "Reload complete. Full message history pulled.")
+            except Exception as e:
+                stdscr.addstr(2, 0, f"Error reloading: {e}")
+
+            stdscr.addstr(4, 0, "Press any key to return...")
             stdscr.getch()
 
         elif choice == "6":
