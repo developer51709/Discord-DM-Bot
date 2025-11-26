@@ -240,3 +240,8 @@ async def main():
     await asyncio.gather(
         client.connect(),
         asyncio.to_thread(run_curses, loop)
+    )
+
+# Entry point
+if __name__ == "__main__":
+    asyncio.run(main())
