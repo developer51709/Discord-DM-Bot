@@ -238,4 +238,5 @@ async def main():
     token = await get_valid_token()
     loop = asyncio.get_running_loop()
     await asyncio.gather(
-        client
+        client.connect(),
+        asyncio.to_thread(run_curses, loop)
