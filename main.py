@@ -309,9 +309,9 @@ def clear_screen():
         os.system("clear")
 
 def print_header():
-    print(c_header("=" * 80))
+    print(c_header("=" * 60))
     print(c_header("Discord DM Relay Bot".center(80)))
-    print(c_header("=" * 80))
+    print(c_header("=" * 60))
 
 def show_menu():
     print_header()
