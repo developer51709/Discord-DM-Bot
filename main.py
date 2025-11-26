@@ -92,8 +92,10 @@ def terminal_ui(stdscr, loop):
         stdscr.addstr(13, 0, "Select option: ")
         stdscr.refresh()
 
+        curses.echo()
         choice = stdscr.getstr(13, 15).decode("utf-8").strip()
-
+        curses.noecho()
+        
         if choice == "1":
             stdscr.clear()
             stdscr.addstr(0, 0, "=== Conversations ===", curses.A_BOLD)
@@ -109,7 +111,9 @@ def terminal_ui(stdscr, loop):
             stdscr.addstr(0, 0, "=== Select Conversation ===", curses.A_BOLD)
             stdscr.addstr(2, 0, "Enter user ID: ")
             stdscr.refresh()
+            curses.echo()
             uid = stdscr.getstr(2, 15).decode("utf-8").strip()
+            curses.noecho()
             try:
                 uid = int(uid)
                 msgs = conversations.get(uid, [])
@@ -121,7 +125,9 @@ def terminal_ui(stdscr, loop):
                     row += 1
                 stdscr.addstr(row+1, 0, "Type reply: ")
                 stdscr.refresh()
+                curses.echo()
                 reply = stdscr.getstr(row+1, 12).decode("utf-8").strip()
+                curses.noecho()
                 if reply:
                     asyncio.run_coroutine_threadsafe(send_reply(uid, reply), loop)
                     conversations.setdefault(uid, []).append(f"You: {reply}")
@@ -136,12 +142,16 @@ def terminal_ui(stdscr, loop):
             stdscr.addstr(0, 0, "=== New Conversation ===", curses.A_BOLD)
             stdscr.addstr(2, 0, "Enter user ID: ")
             stdscr.refresh()
+            curses.echo()
             uid = stdscr.getstr(2, 15).decode("utf-8").strip()
+            curses.noecho()
             try:
                 user_id = int(uid)
                 stdscr.addstr(3, 0, "Enter message: ")
                 stdscr.refresh()
+                curses.echo()
                 msg = stdscr.getstr(3, 15).decode("utf-8").strip()
+                curses.noecho()
                 if msg:
                     asyncio.run_coroutine_threadsafe(send_reply(user_id, msg), loop)
                     conversations.setdefault(user_id, []).append(f"You: {msg}")
@@ -156,7 +166,9 @@ def terminal_ui(stdscr, loop):
             stdscr.addstr(0, 0, "=== Change Token ===", curses.A_BOLD)
             stdscr.addstr(2, 0, "Enter new bot token: ")
             stdscr.refresh()
+            curses.echo()
             new_token = stdscr.getstr(2, 22).decode("utf-8").strip()
+            curses.noecho()
             save_token(new_token)
             stdscr.addstr(4, 0, "Token updated. Restart required. Press any key...")
             stdscr.getch()
