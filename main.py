@@ -5,9 +5,11 @@ import json
 import os
 import curses
 import subprocess
-from typing import List
+from typing import List, Optional
 
 CONFIG_FILE = "config.json"
+KNOWN_USERS_FILE = "known_users.json"
+CONVERSATIONS_FILE = "conversations.json"
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -21,20 +23,53 @@ conversations = {}  # {user_id: [ "Author: content", ... ]}
 bot_status = ""
 
 
-# ---------------- CONFIG MANAGEMENT ----------------
-def load_token() -> str | None:
-    if os.path.exists(CONFIG_FILE):
+# ---------------- Persistence ----------------
+def load_json(path: str, default):
+    if os.path.exists(path):
         try:
-            with open(CONFIG_FILE, "r") as f:
-                return json.load(f).get("token")
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception:
-            return None
-    return None
+            return default
+    return default
 
 
-def save_token(token: str) -> None:
-    with open(CONFIG_FILE, "w") as f:
-        json.dump({"token": token}, f, indent=4)
+def save_json(path: str, data):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def load_known_users() -> List[int]:
+    data = load_json(KNOWN_USERS_FILE, [])
+    return [int(x) for x in data]
+
+
+def save_known_users(user_ids: List[int]):
+    save_json(KNOWN_USERS_FILE, [int(x) for x in user_ids])
+
+
+def load_conversations():
+    global conversations
+    data = load_json(CONVERSATIONS_FILE, {})
+    # ensure keys are ints
+    conversations = {int(k): v for k, v in data.items()}
+
+
+def save_conversations():
+    save_json(CONVERSATIONS_FILE, conversations)
+
+
+# ---------------- CONFIG MANAGEMENT ----------------
+def load_token() -> Optional[str]:
+    cfg = load_json(CONFIG_FILE, {})
+    return cfg.get("token")
+
+
+def save_token(token: str):
+    save_json(CONFIG_FILE, {"token": token})
 
 
 def get_token_interactive() -> str:
@@ -47,24 +82,7 @@ def get_token_interactive() -> str:
     return token
 
 
-# ---------------- DISCORD EVENTS ----------------
-@client.event
-async def on_ready():
-    global bot_status
-    bot_status = f"Connected as {client.user}"
-
-
-@client.event
-async def on_message(message):
-    global unread_count
-    # Only handle direct messages from users (not bots)
-    if isinstance(message.channel, discord.DMChannel) and not message.author.bot:
-        await message_queue.put((message.author, message.content))
-        unread_count += 1
-        conversations.setdefault(message.author.id, []).append(f"{message.author}: {message.content}")
-
-
-# ---------------- ASYNC HELPERS ----------------
+# ---------------- DISCORD HELPERS ----------------
 async def fetch_channel_history(channel: discord.DMChannel) -> List[discord.Message]:
     """Fetch full history for a DM channel (oldest first)."""
     msgs = []
@@ -78,10 +96,35 @@ async def send_reply(uid: int, reply: str) -> None:
     await user.send(reply)
 
 
+# ---------------- DISCORD EVENTS ----------------
+@client.event
+async def on_ready():
+    global bot_status
+    bot_status = f"Connected as {client.user}"
+    # load persisted conversations on ready
+    load_conversations()
+
+
+@client.event
+async def on_message(message):
+    global unread_count
+    if isinstance(message.channel, discord.DMChannel) and not message.author.bot:
+        # queue for UI
+        await message_queue.put((message.author, message.content))
+        unread_count += 1
+        # update in-memory conversations
+        conversations.setdefault(message.author.id, []).append(f"{message.author}: {message.content}")
+        # persist conversations and known users
+        save_conversations()
+        known = set(load_known_users())
+        known.add(message.author.id)
+        save_known_users(sorted(list(known)))
+
+
 # ---------------- TERMINAL UI ----------------
 def terminal_ui(stdscr, loop):
     """
-    Synchronous curses UI. Any async actions are scheduled back onto the event loop
+    Synchronous curses UI. Async actions are scheduled back onto the event loop
     using asyncio.run_coroutine_threadsafe(..., loop).
     """
     global unread_count, bot_status, conversations
@@ -147,7 +190,6 @@ def terminal_ui(stdscr, loop):
                     row += 1
                 else:
                     for msg in msgs[-20:]:
-                        # Truncate long lines to fit screen width
                         try:
                             stdscr.addstr(row, 0, msg[:curses.COLS - 1])
                         except Exception:
@@ -161,6 +203,7 @@ def terminal_ui(stdscr, loop):
                 if reply:
                     asyncio.run_coroutine_threadsafe(send_reply(uid, reply), loop)
                     conversations.setdefault(uid, []).append(f"You: {reply}")
+                    save_conversations()
                     stdscr.addstr(row + 3, 0, "Reply scheduled. Press any key...")
                     stdscr.getch()
             except ValueError:
@@ -185,6 +228,11 @@ def terminal_ui(stdscr, loop):
                 if msg:
                     asyncio.run_coroutine_threadsafe(send_reply(user_id, msg), loop)
                     conversations.setdefault(user_id, []).append(f"You: {msg}")
+                    # persist known user and conversations
+                    known = set(load_known_users())
+                    known.add(user_id)
+                    save_known_users(sorted(list(known)))
+                    save_conversations()
                     stdscr.addstr(5, 0, "Message scheduled. Press any key...")
                     stdscr.getch()
             except ValueError:
@@ -203,7 +251,6 @@ def terminal_ui(stdscr, loop):
                 save_token(new_token)
                 stdscr.addstr(4, 0, "Token updated. Restart required. Press any key...")
                 stdscr.getch()
-                # Close client and exit UI so user can restart with new token
                 asyncio.run_coroutine_threadsafe(client.close(), loop)
                 break
             else:
@@ -215,25 +262,43 @@ def terminal_ui(stdscr, loop):
             stdscr.addstr(0, 0, "=== Reload Messages (Full History) ===", curses.A_BOLD)
             stdscr.refresh()
             try:
-                # Build conversations from all DM channels the bot knows about
-                # client.private_channels is populated after the bot is ready
+                known_ids = load_known_users()
                 found_any = False
-                for channel in client.private_channels:
-                    if isinstance(channel, discord.DMChannel):
-                        found_any = True
-                        recipient = channel.recipient
-                        if recipient is None:
+                for uid in known_ids:
+                    try:
+                        # fetch user and ensure DM channel exists
+                        user = asyncio.run_coroutine_threadsafe(client.fetch_user(uid), loop).result()
+                        channel = user.dm_channel or asyncio.run_coroutine_threadsafe(user.create_dm(), loop).result()
+                        if channel is None:
                             continue
-                        uid = recipient.id
-                        # Fetch history asynchronously and wait for result
-                        future = asyncio.run_coroutine_threadsafe(fetch_channel_history(channel), loop)
-                        history = future.result()
-                        # Populate conversation with oldest-first messages
+                        found_any = True
+                        # fetch history
+                        history_future = asyncio.run_coroutine_threadsafe(fetch_channel_history(channel), loop)
+                        history = history_future.result()
+                        # populate conversation oldest-first
                         conversations[uid] = []
                         for msg in history:
-                            # Use a simple text representation
                             conversations[uid].append(f"{msg.author}: {msg.content}")
-                # Also include any queued messages that arrived while running
+                    except Exception:
+                        # skip problematic user but continue
+                        continue
+
+                # Also include any DM channels the client already knows about
+                for channel in client.private_channels:
+                    if isinstance(channel, discord.DMChannel):
+                        recipient = channel.recipient
+                        if recipient:
+                            uid = recipient.id
+                            if uid not in conversations:
+                                history_future = asyncio.run_coroutine_threadsafe(fetch_channel_history(channel), loop)
+                                history = history_future.result()
+                                conversations[uid] = [f"{m.author}: {m.content}" for m in history]
+                                found_any = True
+                                # persist known user
+                                known = set(load_known_users())
+                                known.add(uid)
+                                save_known_users(sorted(list(known)))
+
                 # Drain message_queue into conversations
                 drained = []
                 while not message_queue.empty():
@@ -241,11 +306,17 @@ def terminal_ui(stdscr, loop):
                     unread_count -= 1
                     conversations.setdefault(author.id, []).append(f"{author}: {content}")
                     drained.append((author, content))
+                    # persist known user
+                    known = set(load_known_users())
+                    known.add(author.id)
+                    save_known_users(sorted(list(known)))
+
+                save_conversations()
 
                 if found_any or drained:
                     stdscr.addstr(2, 0, "Reload complete. Full message history pulled.")
                 else:
-                    stdscr.addstr(2, 0, "No DM channels available to reload (no prior DMs).")
+                    stdscr.addstr(2, 0, "No DM channels or known users to reload (no prior DMs).")
             except Exception as e:
                 stdscr.addstr(2, 0, f"Error reloading: {e}")
             stdscr.addstr(4, 0, "Press any key to return...")
@@ -260,7 +331,6 @@ def terminal_ui(stdscr, loop):
                     ["git", "pull", "origin", "main"],
                     capture_output=True, text=True, cwd=os.path.expanduser("~/Discord-DM-Bot")
                 )
-                # Show stdout and stderr (truncated if too long)
                 out = result.stdout.strip() or "(no output)"
                 err = result.stderr.strip()
                 try:
@@ -279,7 +349,6 @@ def terminal_ui(stdscr, loop):
             stdscr.getch()
 
         elif choice == "7":
-            # Clean shutdown
             asyncio.run_coroutine_threadsafe(client.close(), loop)
             break
 
@@ -294,12 +363,12 @@ def run_curses(loop):
 
 # ---------------- MAIN ----------------
 async def main():
-    # Ensure token exists (interactive prompt if missing)
+    # load persisted conversations and known users early
+    load_conversations()
     token = get_token_interactive()
     loop = asyncio.get_running_loop()
 
-    # Start the curses UI in a separate thread and the bot concurrently.
-    # client.start(token) will log in and connect the client.
+    # Start UI in a separate thread and the bot concurrently
     await asyncio.gather(
         asyncio.to_thread(run_curses, loop),
         client.start(token)
@@ -310,7 +379,6 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # Ensure client is closed on Ctrl+C
         try:
             asyncio.run(client.close())
         except Exception:
