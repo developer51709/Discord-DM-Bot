@@ -16,7 +16,8 @@ message_queue = asyncio.Queue()
 unread_count = 0
 conversations = {}
 
-# ---------------- CONFIG ----------------
+
+# ---------------- CONFIG MANAGEMENT ----------------
 def load_token():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -26,9 +27,11 @@ def load_token():
             return None
     return None
 
+
 def save_token(token):
     with open(CONFIG_FILE, "w") as f:
         json.dump({"token": token}, f, indent=4)
+
 
 async def validate_token(token):
     try:
@@ -36,6 +39,7 @@ async def validate_token(token):
         return True
     except discord.LoginFailure:
         return False
+
 
 async def get_valid_token():
     token = load_token()
@@ -45,10 +49,12 @@ async def get_valid_token():
         save_token(token)
     return token
 
-# ---------------- EVENTS ----------------
+
+# ---------------- DISCORD EVENTS ----------------
 @client.event
 async def on_ready():
     print(f"Bot connected as {client.user}")
+
 
 @client.event
 async def on_message(message):
@@ -57,6 +63,7 @@ async def on_message(message):
         await message_queue.put((message.author, message.content))
         unread_count += 1
         conversations.setdefault(message.author.id, []).append(f"{message.author}: {message.content}")
+
 
 # ---------------- TERMINAL UI ----------------
 def terminal_ui(stdscr, loop):
@@ -82,19 +89,27 @@ def terminal_ui(stdscr, loop):
 
         choice = stdscr.getstr(11, 15).decode("utf-8").strip()
 
-        if choice == "6":
-            break
-
-        elif choice == "2":  # Select Conversation
+        if choice == "1":
             stdscr.clear()
-            stdscr.addstr(0, 0, "Enter user ID: ")
+            stdscr.addstr(0, 0, "=== Conversations ===", curses.A_BOLD)
+            row = 2
+            for uid, msgs in conversations.items():
+                stdscr.addstr(row, 0, f"User {uid}: {len(msgs)} messages")
+                row += 1
+            stdscr.addstr(row+1, 0, "Press any key to return...")
+            stdscr.getch()
+
+        elif choice == "2":
+            stdscr.clear()
+            stdscr.addstr(0, 0, "=== Select Conversation ===", curses.A_BOLD)
+            stdscr.addstr(2, 0, "Enter user ID: ")
             stdscr.refresh()
-            uid = stdscr.getstr(0, 15).decode("utf-8").strip()
+            uid = stdscr.getstr(2, 15).decode("utf-8").strip()
             try:
                 uid = int(uid)
                 msgs = conversations.get(uid, [])
                 stdscr.clear()
-                stdscr.addstr(0, 0, f"Conversation with {uid}", curses.A_BOLD)
+                stdscr.addstr(0, 0, f"=== Conversation with {uid} ===", curses.A_BOLD)
                 row = 2
                 for msg in msgs[-10:]:
                     stdscr.addstr(row, 0, msg)
@@ -103,29 +118,84 @@ def terminal_ui(stdscr, loop):
                 stdscr.refresh()
                 reply = stdscr.getstr(row+1, 12).decode("utf-8").strip()
                 if reply:
-                    # Schedule async send safely
                     asyncio.run_coroutine_threadsafe(send_reply(uid, reply), loop)
                     conversations.setdefault(uid, []).append(f"You: {reply}")
                     stdscr.addstr(row+3, 0, "Reply scheduled. Press any key...")
                     stdscr.getch()
             except ValueError:
-                stdscr.addstr(2, 0, "Invalid user ID. Press any key...")
+                stdscr.addstr(4, 0, "Invalid user ID. Press any key...")
                 stdscr.getch()
+
+        elif choice == "3":
+            stdscr.clear()
+            stdscr.addstr(0, 0, "=== New Conversation ===", curses.A_BOLD)
+            stdscr.addstr(2, 0, "Enter user ID: ")
+            stdscr.refresh()
+            uid = stdscr.getstr(2, 15).decode("utf-8").strip()
+            msg = ""
+            try:
+                user_id = int(uid)
+                stdscr.addstr(3, 0, "Enter message: ")
+                stdscr.refresh()
+                msg = stdscr.getstr(3, 15).decode("utf-8").strip()
+                if msg:
+                    asyncio.run_coroutine_threadsafe(send_reply(user_id, msg), loop)
+                    conversations.setdefault(user_id, []).append(f"You: {msg}")
+                    stdscr.addstr(5, 0, "Message scheduled. Press any key...")
+                    stdscr.getch()
+            except ValueError:
+                stdscr.addstr(4, 0, "Invalid user ID. Press any key...")
+                stdscr.getch()
+
+        elif choice == "4":
+            stdscr.clear()
+            stdscr.addstr(0, 0, "=== Change Token ===", curses.A_BOLD)
+            stdscr.addstr(2, 0, "Enter new bot token: ")
+            stdscr.refresh()
+            new_token = stdscr.getstr(2, 22).decode("utf-8").strip()
+            save_token(new_token)
+            stdscr.addstr(4, 0, "Token updated. Restart required. Press any key...")
+            stdscr.getch()
+            asyncio.run_coroutine_threadsafe(client.close(), loop)
+            break
+
+        elif choice == "5":
+            stdscr.clear()
+            stdscr.addstr(0, 0, "=== Update ===", curses.A_BOLD)
+            stdscr.addstr(2, 0, f"Unread Messages: {unread_count}")
+            if unread_count > 0:
+                stdscr.addstr(4, 0, "New messages available. Check Conversations or Select Conversation.")
+            else:
+                stdscr.addstr(4, 0, "No new messages.")
+            stdscr.addstr(6, 0, "Press any key to return...")
+            stdscr.getch()
+
+        elif choice == "6":
+            asyncio.run_coroutine_threadsafe(client.close(), loop)
+            break
+
+        else:
+            stdscr.addstr(13, 0, "Invalid choice. Press any key...")
+            stdscr.getch()
+
 
 def run_curses(loop):
     curses.wrapper(lambda stdscr: terminal_ui(stdscr, loop))
+
 
 # ---------------- HELPERS ----------------
 async def send_reply(uid, reply):
     user = await client.fetch_user(uid)
     await user.send(reply)
 
+
 # ---------------- MAIN ----------------
 async def main():
     token = await get_valid_token()
     loop = asyncio.get_running_loop()
-    # Run curses UI in a separate thread
-    asyncio.to_thread(run_curses, loop)
-    await client.connect()
+    await asyncio.gather(
+        client.connect(),
+        asyncio.to_thread(run_curses, loop)
+    )
 
 asyncio.run(main())
