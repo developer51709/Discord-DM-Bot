@@ -179,16 +179,18 @@ def terminal_ui(stdscr, loop):
             stdscr.clear()
             stdscr.addstr(0, 0, "=== Reload Messages (Full History) ===", curses.A_BOLD)
             try:
-                for uid in list(conversations.keys()):
-                    user = asyncio.run_coroutine_threadsafe(client.fetch_user(uid), loop).result()
-                    channel = user.dm_channel or asyncio.run_coroutine_threadsafe(user.create_dm(), loop).result()
-
-                    conversations[uid] = []
-                    history_future = asyncio.run_coroutine_threadsafe(channel.history(limit=None).flatten(), loop)
-                    history = history_future.result()
-
-                    for msg in reversed(history):  # oldest first
-                        conversations[uid].append(f"{msg.author}: {msg.content}")
+                # Iterate over all DM channels the bot knows about
+                for channel in client.private_channels:
+                    if isinstance(channel, discord.DMChannel):
+                        uid = channel.recipient.id
+                        conversations[uid] = []
+                        # Fetch full history
+                        history_future = asyncio.run_coroutine_threadsafe(
+                            channel.history(limit=None).flatten(), loop
+                        )
+                        history = history_future.result()
+                        for msg in reversed(history):  # oldest first
+                            conversations[uid].append(f"{msg.author}: {msg.content}")
 
                 stdscr.addstr(2, 0, "Reload complete. Full message history pulled.")
             except Exception as e:
