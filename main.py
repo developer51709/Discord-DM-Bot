@@ -12,7 +12,7 @@ import logging
 import sys
 from typing import List, Optional
 
-# Color support
+# ---------------- Color support ----------------
 try:
     from colorama import init as colorama_init, Fore, Style
     colorama_init(autoreset=True)
@@ -327,7 +327,7 @@ def show_menu():
     print(c_info("2) Select Conversation"))
     print(c_info("3) New Conversation"))
     print(c_info("4) Change Token"))
-    print(c_info("5) Reload Messages (Full History) [runs in background]"))
+    print(c_info("5) Reload Messages (Full History)"))
     print(c_info("6) GitHub Update"))
     print(c_info("7) Exit"))
     print()
