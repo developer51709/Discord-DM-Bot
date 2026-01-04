@@ -6,6 +6,20 @@ This bot is built for reliability, persistence, and high‑volume DM workflows �
 
 ---
 
+## Table of Contents
+- [Key Features](#-key-features)
+- [Installation](#-installation)
+- [Running the Bot](#️-running-the-bot)
+- [Data Files](#-data-files)
+- [Configuration](#-configuration)
+- [How It Works](#-how-it-works-technical-overview)
+- [Troubleshooting](#-troubleshooting)
+- [Tested On](#-tested-on)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
 ## 🚀 Key Features
 
 ### 📨 Real‑time DM Relay
