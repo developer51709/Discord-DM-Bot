@@ -112,3 +112,4 @@ The bot automatically manages:
 
 | File | Purpose |
 |------|---------|
+| `config.json` | Stores bot token |
