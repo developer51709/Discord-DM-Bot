@@ -203,6 +203,12 @@ This should never happen due to atomic writes, but if it does:
 
 ---
 
+## 🧪 Tested On
+- Termux (Android)
+- Windows 11
+
+---
+
 ## 🤝 Contributing
 Pull requests are welcome!
 If you’d like to add features (UI, commands, analytics, etc.), feel free to fork the repo.
