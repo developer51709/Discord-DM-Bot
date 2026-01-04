@@ -128,3 +128,83 @@ You can adjust behavior via constants in the code:
 | `HISTORY_FETCH_LIMIT` | Max messages to fetch per DM channel |
 | `HISTORY_CONCURRENCY` | Number of concurrent history fetch tasks |
 | `HISTORY_FETCH_TIMEOUT` | Timeout for full reload operation |
+
+---
+
+## 🧠 How It Works (Technical Overview)
+### 1. DM Capture
+`on_message` intercepts all DMChannel messages and:
+
+- Adds them to a queue
+
+- Updates unread counters
+
+- Appends to conversation logs
+
+- Saves known users
+
+### 2. History Reload
+The `reload_all_histories()` coroutine:
+
+- Iterates through all known users
+
+- Fetches DM history
+
+- Rebuilds conversation logs
+
+- Merges queued messages
+
+- Saves everything atomically
+
+### 3. Thread‑Safe State
+Locks protect:
+
+- `unread_count`
+
+- `conversations`
+
+- `bot_status`
+
+### 4. CLI Utilities
+Functions like `clear_screen()`, `wrap_text()`, and `print_header()` provide a clean terminal UI.
+
+---
+
+## 🛡️ Required Discord Intents
+Enable these in the Discord Developer Portal:
+
+Direct Messages
+
+Message Content (if needed for content processing)
+
+🐛 Troubleshooting
+Bot doesn’t receive DMs
+Ensure DM intents are enabled
+
+Confirm the bot is not blocked by the user
+
+Check terminal logs for errors
+
+History reload fails
+Increase HISTORY_FETCH_TIMEOUT
+
+Reduce HISTORY_CONCURRENCY
+
+Check for rate limits in logs
+
+JSON files corrupted
+This should never happen due to atomic writes, but if it does:
+
+Delete the affected file
+
+Restart the bot
+
+🤝 Contributing
+Pull requests are welcome!
+If you’d like to add features (UI, commands, analytics, etc.), feel free to fork the repo.
+
+📜 License
+This project is licensed under the MIT License.
+
+⭐ Support the Project
+If this bot helps you, consider starring the repository!
