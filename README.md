@@ -79,6 +79,8 @@ Create a `config.json` file or let the bot prompt you interactively:
 }
 ```
 
+---
+
 ## ▶️ Running the Bot
 Start the bot with:
 
@@ -102,3 +104,10 @@ Once authenticated, the bot will:
 - Begin listening for DMs
 
 - Start the relay loop
+
+---
+
+## 📁 Data Files
+The bot automatically manages:
+
+| File | Purpose |
