@@ -173,9 +173,9 @@ Functions like `clear_screen()`, `wrap_text()`, and `print_header()` provide a c
 ## 🛡️ Required Discord Intents
 Enable these in the Discord Developer Portal:
 
-Direct Messages
+- Direct Messages
 
-Message Content (if needed for content processing)
+- Message Content (if needed for content processing)
 
 ---
 
