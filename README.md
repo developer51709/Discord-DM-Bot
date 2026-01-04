@@ -111,3 +111,4 @@ Once authenticated, the bot will:
 The bot automatically manages:
 
 | File | Purpose |
+|------|---------|
