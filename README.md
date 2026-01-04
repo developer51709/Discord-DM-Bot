@@ -125,3 +125,6 @@ You can adjust behavior via constants in the code:
 
 | Setting | Description |
 |---------|-------------|
+| `HISTORY_FETCH_LIMIT` | Max messages to fetch per DM channel |
+| `HISTORY_CONCURRENCY` | Number of concurrent history fetch tasks |
+| `HISTORY_FETCH_TIMEOUT` | Timeout for full reload operation |
