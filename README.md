@@ -177,34 +177,42 @@ Direct Messages
 
 Message Content (if needed for content processing)
 
-🐛 Troubleshooting
-Bot doesn’t receive DMs
-Ensure DM intents are enabled
+---
 
-Confirm the bot is not blocked by the user
+## 🐛 Troubleshooting
+### Bot doesn’t receive DMs
+- Ensure DM intents are enabled
 
-Check terminal logs for errors
+- Confirm the bot is not blocked by the user
 
-History reload fails
-Increase HISTORY_FETCH_TIMEOUT
+- Check terminal logs for errors
 
-Reduce HISTORY_CONCURRENCY
+### History reload fails
+- Increase `HISTORY_FETCH_TIMEOUT`
 
-Check for rate limits in logs
+- Reduce `HISTORY_CONCURRENCY`
 
-JSON files corrupted
+- Check for rate limits in logs
+
+### JSON files corrupted
 This should never happen due to atomic writes, but if it does:
 
-Delete the affected file
+- Delete the affected file
 
-Restart the bot
+- Restart the bot
 
-🤝 Contributing
+---
+
+## 🤝 Contributing
 Pull requests are welcome!
 If you’d like to add features (UI, commands, analytics, etc.), feel free to fork the repo.
 
-📜 License
+---
+
+## 📜 License
 This project is licensed under the MIT License.
 
-⭐ Support the Project
+---
+
+## ⭐ Support the Project
 If this bot helps you, consider starring the repository!
