@@ -173,15 +173,15 @@ Functions like `clear_screen()`, `wrap_text()`, and `print_header()` provide a c
 ## 🛡️ Required Discord Intents
 Enable these in the Discord Developer Portal:
 
-- Direct Messages
+- **Direct Messages**
 
-- Message Content (if needed for content processing)
+- **Message Content** (if needed for content processing)
 
 ---
 
 ## 🐛 Troubleshooting
 ### Bot doesn’t receive DMs
-- Ensure DM intents are enabled
+- Ensure **DM intents** are enabled
 
 - Confirm the bot is not blocked by the user
 
