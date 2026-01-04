@@ -114,4 +114,4 @@ The bot automatically manages:
 |------|---------|
 | `config.json` | Stores bot token |
 | `known_users.json` | List of user IDs who have DM’d the bot |
-|||
+| `conversations.json` | Full DM history per user |
