@@ -216,3 +216,9 @@ This project is licensed under the MIT License.
 
 ## ⭐ Support the Project
 If this bot helps you, consider starring the repository!
+
+---
+
+![Python](https://img.shields.io/badge/Python-3.10+-blue)
+![License](https://img.shields.io/badge/License-MIT-green)
+![Platform](https://img.shields.io/badge/Platform-Windows%2011%20%7C%20Linux-lightgrey)
