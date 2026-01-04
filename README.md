@@ -113,3 +113,5 @@ The bot automatically manages:
 | File | Purpose |
 |------|---------|
 | `config.json` | Stores bot token |
+| `known_users.json` | List of user IDs who have DM’d the bot |
+|||
