@@ -1,0 +1,11 @@
+[project]
+name = "Discord-DM-Bot"
+version = "0.1.0"
+description = "A simple Discord bot for sending DMs to specific server members."
+authors = [
+    {name = "Nyxen", email = "developer51709@proton.me", github = "developer51709"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "discord-py>=2.6.4",
+]
