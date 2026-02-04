@@ -12,7 +12,7 @@ import logging
 import sys
 from typing import List, Optional
 
-# ---------------- Color support ----------------
+# ---------- Color support ----------
 try:
     from colorama import init as colorama_init, Fore, Style
     colorama_init(autoreset=True)
@@ -32,7 +32,7 @@ except Exception:
     Fore = _F()
     Style = _F()
 
-# ---------------- Configuration ----------------
+# ---------- Configuration ----------
 CONFIG_FILE = "config.json"
 KNOWN_USERS_FILE = "known_users.json"
 CONVERSATIONS_FILE = "conversations.json"
@@ -41,7 +41,7 @@ HISTORY_FETCH_LIMIT = None
 HISTORY_CONCURRENCY = 3
 HISTORY_FETCH_TIMEOUT = 120
 
-# ---------------- Logging (to stderr) ----------------
+# ------- Logging (to stderr) -------
 handler = logging.StreamHandler(sys.stderr)
 logging.basicConfig(
     level=logging.INFO,
@@ -50,14 +50,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dm-relay")
 
-# ---------------- Discord client setup ----------------
+# ------ Discord client setup ------
 intents = discord.Intents.default()
 intents.messages = True
 intents.dm_messages = True
 
 client = discord.Client(intents=intents)
 
-# ---------------- Shared state and synchronization ----------------
+#  Shared state and synchronization 
 incoming_queue = queue.Queue()
 unread_count = 0
 unread_lock = threading.Lock()
@@ -72,7 +72,7 @@ bot_status_lock = threading.Lock()
 
 bot_ready_event: Optional[asyncio.Event] = None
 
-# ---------------- Utility: atomic save ----------------
+# ------ Utility: atomic save ------
 def atomic_save(path: str, data) -> None:
     dirn = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=dirn)
@@ -90,7 +90,7 @@ def atomic_save(path: str, data) -> None:
             pass
         raise
 
-# ---------------- Persistence ----------------
+# ----------- Persistence -----------
 def load_json(path: str, default):
     if os.path.exists(path):
         try:
@@ -133,7 +133,7 @@ def save_conversations_sync():
 async def save_conversations():
     await asyncio.to_thread(save_conversations_sync)
 
-# ---------------- Config management ----------------
+# -------- Config management --------
 def load_token() -> Optional[str]:
     cfg = load_json(CONFIG_FILE, {})
     return cfg.get("token")
@@ -150,7 +150,7 @@ def get_token_interactive() -> str:
             save_token(token)
     return token
 
-# ---------------- Discord helpers ----------------
+# --------- Discord helpers ---------
 async def fetch_channel_history(channel: discord.DMChannel, limit: Optional[int] = HISTORY_FETCH_LIMIT):
     msgs = []
     try:
@@ -164,7 +164,7 @@ async def send_reply(uid: int, reply: str) -> None:
     user = client.get_user(uid) or await client.fetch_user(uid)
     await user.send(reply)
 
-# ---------------- Discord events ----------------
+# --------- Discord events ---------
 @client.event
 async def on_ready():
     global bot_status, bot_ready_event
@@ -189,7 +189,7 @@ async def on_message(message):
         known.add(message.author.id)
         asyncio.create_task(save_known_users(sorted(list(known))))
 
-# ---------------- Reload task ----------------
+# ----------- Reload task -----------
 async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit_per_channel: Optional[int] = HISTORY_FETCH_LIMIT):
     logger.info("Starting reload_all_histories (limit=%s, concurrency=%s)", limit_per_channel, semaphore_limit)
     sem = asyncio.Semaphore(semaphore_limit)
@@ -260,7 +260,7 @@ async def reload_all_histories(semaphore_limit: int = HISTORY_CONCURRENCY, limit
     logger.info("Reload complete: updated %d conversations, drained %d queued messages", updated, len(drained))
     return {"updated": updated, "drained": len(drained)}
 
-# ---------------- Color helpers ----------------
+# ---------- Color helpers ----------
 def c_header(text: str):
     if COLORAMA_AVAILABLE:
         return f"{Style.BRIGHT}{Fore.CYAN}{text}{Style.RESET_ALL}"
@@ -291,7 +291,7 @@ def c_prompt(text: str):
         return f"{Fore.MAGENTA}{text}{Style.RESET_ALL}"
     return text
 
-# ---------------- CLI (synchronous) ----------------
+# -------- CLI (synchronous) --------
 def wrap_text(text: str, width: int = 80) -> str:
     paragraphs = text.splitlines() or [""]
     wrapped = []
@@ -309,9 +309,9 @@ def clear_screen():
         os.system("clear")
 
 def print_header():
-    print(c_header("=" * 50))
-    print(c_header("Discord DM Relay Bot".center(50)))
-    print(c_header("=" * 50))
+    print(c_header("=" * 40))
+    print(c_header("Discord DM Relay Bot".center(40)))
+    print(c_header("=" * 40))
 
 def show_menu():
     print_header()
@@ -526,7 +526,7 @@ def run_cli(loop: asyncio.AbstractEventLoop):
         except Exception:
             pass
 
-# ---------------- Main entrypoint ----------------
+# --------- Main entrypoint ---------
 async def main():
     global bot_ready_event
     bot_ready_event = asyncio.Event()
