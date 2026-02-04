@@ -7,6 +7,7 @@ This bot is built for reliability, persistence, and high‑volume DM workflows �
 ---
 
 ## Table of Contents
+- [To-Do](#-to-do)
 - [Key Features](#-key-features)
 - [Installation](#-installation)
 - [Running the Bot](#️-running-the-bot)
@@ -19,6 +20,12 @@ This bot is built for reliability, persistence, and high‑volume DM workflows �
 - [License](#-license)
 
 ---
+
+## 📋 To-Do
+These are features that are planned for a future update.
+- [ ] Add a mass DM option for server wide announcements
+- [ ] Add a web dashboard feature for supported hosts and devices
+- [ ] Improve tool performance
 
 ## 🚀 Key Features
 
@@ -220,6 +227,7 @@ This should never happen due to atomic writes, but if it does:
 ## 🧪 Tested On
 - Termux (Android)
 - Windows 11
+- Replit
 
 ---
 
